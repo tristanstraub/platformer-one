@@ -1,6 +1,7 @@
 (ns platformer-one.components.svg
-  (:require-macros [cljs.core.async.macros :refer [go]])
-  (:require 
+  (:require-macros [cljs.core.async.macros :refer [go]]
+                   [platformer-one.util :refer [print-once]])
+  (:require
    [quile.component :as component]
    [platformer-one.ces.statemachine :as sm]
    [platformer-one.ces.component :refer [IComponent]]
@@ -14,37 +15,36 @@
     [(.-cx bbox)
      (.-cy bbox)]))
 
-(defn transform-matrix! 
-  ([m transform]
-     (transform-matrix! nil m transform))
+(defn transform-matrix!
   ([ctx m transform]
      (if-let [r (:rotate transform)]
        (if-let [around (:around transform)]
-         (do
-           (let [c (center-of ctx around)]
-             (.translate m (c 0) (c 1))
-             (.rotate m r)
-             (.translate m (- (c 0)) (- (c 1)))))
+         (let [c (center-of ctx around)]
+           (.translate m (c 0) (c 1))
+           (.rotate m r)
+           (.translate m (- (c 0)) (- (c 1))))
          (.rotate m r)))
 
      (if-let [t (:translate transform)]
        (.translate m (t 0) (t 1)))
+
      (if-let [s (:scale transform)]
        (.scale m (s 0) (s 1)))))
 
-(defn transforms->matrix 
+(defn transforms->matrix
   ([ctx matrix transforms]
-     (doseq [transform transforms]
-       (transform-matrix! ctx matrix transform))
-     matrix)
+     (let [matrix (or matrix (js/Snap.Matrix.))]
+       (doseq [transform transforms]
+         (transform-matrix! ctx matrix transform))
+       matrix))
   ([ctx transforms]
-     (transforms->matrix ctx (js/Snap.Matrix.) transforms)))
+     (transforms->matrix ctx nil transforms)))
 
 (defn string->matrix [s]
   (js/Snap.Matrix. s))
 
 (defn load-svg! [{:keys [assets]} state]
-  (go 
+  (go
    (reset! (:content state) (<! (assets/load-svg assets (:name state))))
    (swap! (:states state) #(sm/do-action % :loaded))))
 
@@ -63,7 +63,8 @@
         transforms (:transforms state)
         mask-snapshot (apply hash-set @(:mask-snapshot state))
         transforms-snapshot @(:transforms-snapshot state)
-        root (swap! (:root state) #(or % (.g (:snap canvas))))]
+        root (swap! (:root state) #(or % (.g (:snap canvas))))
+        content-transforms (atom {})]
 
     (.attr root #js {:id (str "#svg" (:id state))})
 
@@ -78,25 +79,47 @@
              previous nil]
         (when (< 0 (count keys))
           (let [key (first keys)
-                part (.clone (.select content key))]
+                original (.select content key)
+                part (.clone original)]
             (apply-key-to-element! part key)
             (if previous
               (.after previous part)
-              (.append root part))          
+              (.append root part))
+
+            (swap! (:original-transforms state) #(assoc % key (.-localMatrix (.transform original))))
+
             (recur (rest keys) part)))))
+
+    (swap! (:original-transforms state) #(assoc % :root (.-localMatrix (.transform (.select content "#layer1")))))
 
     ;; transform all parts
     (doseq [[key transforms] (group-by first transforms)]
-      (let [transforms (map second transforms)]
+      (let [transforms (map second transforms)
+            matrix (transforms->matrix content (.clone (get @(:original-transforms state) key))
+                                       transforms)]
         (cond (= :root key)
-              (.transform root (transforms->matrix content transforms))
+              (.transform root matrix)
               :else
-              (do
-                (let [matrix (string->matrix (:localMatrix (.transform (.select content key))))]
-                  (.transform (.select root key) (transforms->matrix content matrix transforms)))))))
+              (.transform (.select root key) matrix))))
+
+    ;; abuse (:order state) as all selectors, including joints
+    ;; (let [base-transforms (into {} (map (fn [key] [key []]) (:order state)))
+    ;;       key-transforms (group-by first transforms)]
+
+    ;;   (doseq [[key transforms] (merge base-transforms key-transforms)]
+    ;;     (let [transforms (map second transforms)]
+    ;;       (cond (= :root key)
+    ;;             (do
+    ;;               (.transform root (transforms->matrix root transforms)))
+    ;;             :else
+    ;;             (do
+    ;;               (let [matrix (string->matrix (:localMatrix (.transform (.select content key))))
+    ;;                     matrix (transforms->matrix root matrix transforms)]
+    ;;                 (.transform (.select root key) matrix)))))))
 
     (reset! (:mask-snapshot state) mask)
     (reset! (:transforms-snapshot state) transforms)))
+
 
 (defrecord Svg [assets canvas]
   ;; component/Lifecycle
@@ -107,10 +130,10 @@
   (create-state [this] {:id (swap! ids inc)
                         :mask nil
                         :transforms nil
-                        ;; would be better to feed this to a stream 
+                        ;; would be better to feed this to a stream
                         ;; at the top, and then get rid of the atom
                         :content (atom nil)
-                        :part-transforms (atom nil)
+                        :original-transforms (atom {})
                         :root (atom nil)
                         :mask-snapshot (atom nil)
                         :transforms-snapshot (atom nil)
@@ -122,7 +145,7 @@
   (update-component-state [this world state]
     state)
 
-  (synchronise! [this state]    
+  (synchronise! [this state]
     (case (:state @(:states state))
       :init (do (swap! (:states state) #(sm/do-action % :load))
                 (load-svg! this state))
@@ -135,6 +158,7 @@
 
   p/ITransformable
   (apply-transforms [this state transforms]
+
     (assoc state :transforms transforms))
 
   p/IOrderable

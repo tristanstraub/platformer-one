@@ -20,16 +20,16 @@
       (update-in [:pose :key] (fn [key] (:pose (:animation robot))))
 
       ;; animation
-      (update-in [:svg] (fn [svg] 
+      (update-in [:svg] (fn [svg]
                           (p/apply-mask (:svg components) svg (pose/get-selectors (:pose robot)))))
-      (update-in [:svg] (fn [svg] 
+      (update-in [:svg] (fn [svg]
                           (p/apply-order (:svg components) svg (pose/get-selector-order (:pose robot)))))
-      (update-in [:svg] (fn [svg] 
-                          (p/apply-transforms (:svg components) svg (concat (pose/get-transforms (:pose robot))
-                                                                            (:transforms robot)))))))
+      (update-in [:svg] (fn [svg]
+                          (p/apply-transforms (:svg components) svg (concat                                                                             (:transforms robot) (pose/get-transforms (:pose robot))
+                                                                                                                                                        ))))))
 
 (defn update-entities [world entities components]
-  (let [game-state @(:game-state world) 
+  (let [game-state @(:game-state world)
         update-components #(update-components world % components)
         update-robots (partial map (fn [entity]
                                      (if (:robot? entity)
@@ -46,13 +46,13 @@
     (assoc this
       :ticks (atom 0)
       :entities
-      (atom (map (fn [[key {:keys [descriptor transforms]}]] 
+      (atom (map (fn [[key {:keys [descriptor transforms]}]]
                    {:robot? true
                     :svg (assoc (create-state (:svg components)) :name "robot.svg")
                     :pose {:key :standing :descriptor descriptor}
                     :animation (assoc (create-state (:animation components))
                                  :frames (:walking (:animations descriptor)))
-                    :transforms (map (fn [transform] [:root transform]) 
+                    :transforms (map (fn [transform] [:root transform])
                                      transforms)})
                  scene/descriptor))))
 

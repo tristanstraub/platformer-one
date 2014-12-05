@@ -7,7 +7,7 @@
   component/Lifecycle
   (start [this]
     (assoc this :stop-animation
-      (each-animation-frame #(world/update! world))))
+           (each-animation-frame #(world/update! world))))
 
   (stop [this]
     ((:stop-animation this))))
